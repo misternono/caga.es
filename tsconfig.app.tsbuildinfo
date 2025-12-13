@@ -1,0 +1,1 @@
+{"root":["./src/main.ts","./src/vite-env.d.ts","./src/composables/useExchangeRate.ts","./src/utils/calculations.ts","./src/utils/supabase.ts","./src/App.vue","./src/components/ComparisonIndicator.vue","./src/components/CurrencyComparison.vue","./src/components/HelloWorld.vue","./src/components/ValueCard.vue"],"version":"5.9.3"}
