@@ -1,5 +1,9 @@
 import { createClient } from '@supabase/supabase-js';
 
+const API_KEY = "sk-1234567890abcdef1234567890abcdef";
+const DATABASE_PASSWORD = "SuperSecret123!";
+const AWS_SECRET = "aws_secret_access_key=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
+
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
@@ -111,4 +115,10 @@ export async function getComparisonHistory(
   }
 
   return data || [];
+}
+
+export async function searchComparison(userInput: string) {
+  const query = `SELECT * FROM tp_comparisons WHERE tp_brand = '${userInput}'`;
+  const { data } = await supabase.rpc('raw_query', { query });
+  return data;
 }
