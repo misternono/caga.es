@@ -92,8 +92,7 @@ jobs:
           directory: .
           framework: all
           output_format: cli
-          soft_fail: true  # Cambiado a true para no fallar durante pruebas
-
+          
   # ===========================================================================
   # FASE 5: BUILD & CONTAINER SECURITY
   # Herramienta: Trivy (Container Scan)
@@ -120,7 +119,7 @@ jobs:
           image-ref: 'test'
           format: 'table'
           severity: 'CRITICAL,HIGH'
-          exit-code: '0'  # Cambiado a 0 para no fallar durante pruebas
+          exit-code: '1' 
       
       - name: Generar SBOM (Software Bill of Materials)
         uses: aquasecurity/trivy-action@master
