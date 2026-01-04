@@ -1,0 +1,223 @@
+
+name: DevSecOps Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+env:
+  IMAGE_NAME: caga.es
+  
+jobs:
+  # ===========================================================================
+  # FASE 1: SECRET SCANNING
+  # Herramienta: Gitleaks
+  # Riesgo mitigado: Credenciales en ódigo fuente
+  # ===========================================================================
+  secret-scan:
+    name: Secret Scanning
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Necesario para escanear todo el historial
+      
+      - name: Ejecutar Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_NOTIFY_USER_LIST: '@security-team'
+
+  # ===========================================================================
+  # FASE 2: SOFTWARE COMPOSITION ANALYSIS (SCA)
+  # Herramienta: Trivy
+  # Riesgo mitigado: Vulnerabilidades en dependencias de terceros
+  # ===========================================================================
+  dependency-scan:
+    name: Dependency Scan (SCA)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+      
+      - name: Ejecutar Trivy - Filesystem Scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'table'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'  # Falla el pipeline si encuentra vulnerabilidades críticas
+      
+      - name: Generar reporte SARIF
+        uses: aquasecurity/trivy-action@master
+        if: always()
+        with:
+          scan-type: 'fs'
+          format: 'sarif'
+          output: 'trivy-sca-results.sarif'
+      
+      - name: Subir resultados a GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-sca-results.sarif'
+
+  # ===========================================================================
+  # FASE 3: STATIC APPLICATION SECURITY TESTING (SAST)
+  # Herramienta: Semgrep
+  # Riesgo mitigado: Vulnerabilidades en código propio (SQLi, XSS, etc.)
+  # ===========================================================================
+  sast-scan:
+    name: SAST Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+      
+      - name: Ejecutar Semgrep
+        uses: returntocorp/semgrep-action@v1
+        with:
+          config: >-
+            p/owasp-top-ten
+            p/security-audit
+            p/secrets
+          generateSarif: true
+      
+      - name: Subir resultados SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: semgrep.sarif
+
+  # ===========================================================================
+  # FASE 4: INFRASTRUCTURE AS CODE SECURITY
+  # Herramienta: Checkov
+  # Riesgo mitigado: Misconfigurations en Terraform, Dockerfiles, K8s
+  # ===========================================================================
+  iac-scan:
+    name: IaC Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+      
+      - name: Ejecutar Checkov
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: .
+          framework: all
+          output_format: cli,sarif
+          output_file_path: console,checkov-results.sarif
+          soft_fail: false  # Falla si encuentra problemas críticos
+      
+      - name: Subir resultados SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: checkov-results.sarif
+
+  # ===========================================================================
+  # FASE 5: BUILD & CONTAINER SECURITY
+  # Herramienta: Trivy (Container Scan)
+  # Riesgo mitigado: Vulnerabilidades en imagen Docker
+  # ===========================================================================
+  build-and-scan:
+    name: Build & Container Scan
+    runs-on: ubuntu-latest
+    needs: [secret-scan, dependency-scan, sast-scan, iac-scan]
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Build imagen Docker
+        run: |
+          docker build -t test .
+      
+      - name: Escanear imagen con Trivy
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'test'
+          format: 'table'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'
+      
+      - name: Generar SBOM (Software Bill of Materials)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'test'
+          format: 'cyclonedx'
+          output: 'sbom.json'
+      
+      - name: Subir SBOM como artefacto
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom.json
+
+  # ===========================================================================
+  # FASE 6: DEPLOY A STAGING
+  # Despliega solo si todos los escaneos pasaron
+  # ===========================================================================
+  # deploy-staging:
+    # name: Deploy Staging
+    # runs-on: ubuntu-latest
+    # needs: [build-and-scan]
+    # environment: staging
+    # steps:
+      # - name: Checkout código
+        # uses: actions/checkout@v4
+      
+      # - name: Deploy a staging
+        # run: |
+
+  # ===========================================================================
+  # FASE 7: DYNAMIC APPLICATION SECURITY TESTING (DAST)
+  # Herramienta: OWASP ZAP
+  # Riesgo mitigado: Vulnerabilidades en runtime (OWASP Top 10)
+  # ===========================================================================
+  # dast-scan:
+    # name: DAST Scan
+    # runs-on: ubuntu-latest
+    # needs: [deploy-staging]
+    # steps:
+      # - name: Checkout código
+        # uses: actions/checkout@v4
+      
+      # - name: Ejecutar OWASP ZAP Baseline Scan
+        # uses: zaproxy/action-baseline@v0.12.0
+        # with:
+          # target: 'https://staging.tudominio.com'
+          # rules_file_name: '.zap/rules.tsv'
+          # cmd_options: '-a'
+      
+      # - name: Subir reporte ZAP
+        # uses: actions/upload-artifact@v4
+        # if: always()
+        # with:
+          # name: zap-report
+          # path: report_html.html
+
+  # ===========================================================================
+  # FASE 8: DEPLOY A PRODUCCIÓN
+  # Solo después de pasar DAST, con aprobación manual
+  # ===========================================================================
+  # deploy-production:
+    # name: Deploy Production
+    # runs-on: ubuntu-latest
+    # needs: [dast-scan]
+    # environment: 
+      # name: production
+      # url: https://tudominio.com
+    # steps:
+      # - name: Checkout código
+        # uses: actions/checkout@v4
+      
+      # - name: Deploy a producción
+        # run: |
